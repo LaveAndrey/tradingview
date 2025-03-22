@@ -111,7 +111,7 @@ async def webhook(request: Request):
         message = (
             f"{action_emoji} *{action.upper()}* \n\n"
             f"*{symbol.upper()}*\n\n"
-            f"PRICE - *{close}USDT*\n"
+            f"PRICE - *{close}$*\n"
             f"MARKET CAP - *{format_number(market_cap)}$*\n"
             f"24H VOLUME - *{format_number(volume_24h)}$*\n\n"
             f"Trading on the MEXC exchange - *https://promote.mexc.com/r/scn7giWq*"
