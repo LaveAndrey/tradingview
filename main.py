@@ -1,16 +1,18 @@
 from fastapi import FastAPI, Request, HTTPException
 from pycoingecko import CoinGeckoAPI
+from dotenv import load_dotenv
 import requests
+import os
 
 app = FastAPI()
 
-# Токен вашего Telegram-бота
-TOKEN = '7848154062:AAGRfSaAuxp2NBMWEf3Y3KjZW8ZGy29ijPY'
-# ID вашего чата в Telegram
-CHAT_ID = '-4618962576'
+load_dotenv()
 
 # Инициализация CoinGecko API
 cg = CoinGeckoAPI()
+
+TOKEN = os.getenv('TOKENTELEGRAM')
+CHAT_ID = os.getenv('CHAT_IDTELEGRAM')
 
 
 # Функция для отправки сообщения в Telegram
@@ -87,8 +89,15 @@ async def webhook(request: Request):
         # Извлекаем переменные из данных
         ticker = data.get('ticker', 'N/A')  # Пример: BTCUSDT.P, ETHUSDT.P и т.д.
         close = data.get('close', 'N/A')
-        volume = data.get('volume', 'N/A')
         action = data.get('strategy.order.action', 'N/A')
+
+        # Определяем эмодзи в зависимости от действия
+        if action.lower() == 'buy':
+            action_emoji = '🟢'
+        elif action.lower() == 'sell':
+            action_emoji = '🔴'
+        else:
+            action_emoji = '⚪'  # Если действие неизвестно, используем белый кружок
 
         # Извлекаем символ монеты из тикера (например, BTCUSDT.P → BTC)
         symbol = extract_symbol(ticker)
@@ -99,10 +108,9 @@ async def webhook(request: Request):
 
         # Формируем текст сообщения
         message = (
-            f"Reddington VIP LIMIT ORDER *{action}*\n\n"
-            f"*{symbol.upper()}*\n"
-            f"PRICE - *{close} USDT*\n"
-            f"VOLUME - *{volume}*\n"
+            f"{action_emoji} *{action.upper()}*\n\n"
+            f"*{symbol.upper()}*\n\n"
+            f"PRICE - *{close}$*\n"
             f"MARKET CAP - *{format_number(market_cap)}$*\n"
             f"24H VOLUME - *{format_number(volume_24h)}$*\n\n"
             f"Trading on the MEXC exchange - *https://promote.mexc.com/r/scn7giWq*"
