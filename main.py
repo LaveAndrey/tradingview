@@ -7,7 +7,7 @@ app = FastAPI()
 # Токен вашего Telegram-бота
 TOKEN = '7848154062:AAGRfSaAuxp2NBMWEf3Y3KjZW8ZGy29ijPY'
 # ID вашего чата в Telegram
-CHAT_ID = '-4618962576'
+CHAT_ID = '-1002537167876'
 
 # Инициализация CoinGecko API
 cg = CoinGeckoAPI()
@@ -87,7 +87,6 @@ async def webhook(request: Request):
         # Извлекаем переменные из данных
         ticker = data.get('ticker', 'N/A')  # Пример: BTCUSDT.P, ETHUSDT.P и т.д.
         close = data.get('close', 'N/A')
-        volume = data.get('volume', 'N/A')
         action = data.get('strategy.order.action', 'N/A')
 
         # Определяем эмодзи в зависимости от действия
@@ -107,10 +106,9 @@ async def webhook(request: Request):
 
         # Формируем текст сообщения
         message = (
-            f"{action_emoji} *{action}*\n\n"
-            f"*{symbol.upper()}*\n"
+            f"{action_emoji} *{action.upper()}*\n\n"
+            f"*{symbol.upper()}*\n\n"
             f"PRICE - *{close}$*\n"
-            f"VOLUME - *{volume}*\n"
             f"MARKET CAP - *{format_number(market_cap)}$*\n"
             f"24H VOLUME - *{format_number(volume_24h)}$*\n\n"
             f"Trading on the MEXC exchange - *https://promote.mexc.com/r/scn7giWq*"
