@@ -1,13 +1,17 @@
 from fastapi import FastAPI, Request, HTTPException
 from pycoingecko import CoinGeckoAPI
+from dotenv import load_dotenv
 import requests
+import os
 
 app = FastAPI()
 
+load_dotenv()
+
 # Токен вашего Telegram-бота
-TOKEN = '7848154062:AAGRfSaAuxp2NBMWEf3Y3KjZW8ZGy29ijPY'
+TOKEN = os.getenv('TOKENTELEGRAM')
 # ID вашего чата в Telegram
-CHAT_ID = '-4618962576'
+CHAT_ID = os.getenv('CHAT_IDTELEGRAM')
 
 # Инициализация CoinGecko API
 cg = CoinGeckoAPI()
