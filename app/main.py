@@ -1,6 +1,6 @@
 from fastapi import FastAPI
-from app.routers.webhook import router as webhook_router
-from app.services.sheduler import start_scheduler
+from routers.webhook import router as webhook_router
+from services.sheduler import start_scheduler
 import logging
 
 logging.basicConfig(
