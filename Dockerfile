@@ -13,6 +13,8 @@ RUN pip install -r requirements.txt
 # Копируем остальные файлы проекта
 COPY . .
 
+ENV PYTHONPATH=/app
+
 # Указываем порт, который будет использовать приложение
 EXPOSE 5000
 
