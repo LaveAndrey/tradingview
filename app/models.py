@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, Numeric, Enum, DateTime
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
 
@@ -9,9 +9,9 @@ class Trade(Base):
     __tablename__ = "trades"
     id = Column(Integer, primary_key=True)
     signal_id = Column(String(50), unique=True, index=True)  # Для поиска дубликатов
-    action = Column(String(10), nullable=False)
+    action = Column(Enum('buy', 'sell', name='action_type'))
     symbol = Column(String(20), nullable=False, index=True)
-    price = Column(String(20), nullable=False)
+    price = Column(Numeric(10, 2))  # Вместо String(20)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
 class DailyReport(Base):

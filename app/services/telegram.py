@@ -15,7 +15,7 @@ class TelegramBot:
         for attempt in range(max_retries):
             try:
                 response = requests.post(
-                    f"https://api.telegram.org/bot{Config.TELEGRAM_TOKEN}/sendMessage",
+                    f"https://api.telegram.org/bot{Config.TOKEN}/sendMessage",
                     json={
                         "chat_id": chat_id,
                         "text": text,
