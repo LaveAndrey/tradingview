@@ -1,7 +1,11 @@
 from fastapi import FastAPI
 from routers.webhook import router as webhook_router
 from services.sheduler import start_scheduler
+from app.database import Base, engine
 import logging
+
+Base.metadata.create_all(bind=engine)
+print("Database tables created!")
 
 logging.basicConfig(
     level=logging.INFO,
