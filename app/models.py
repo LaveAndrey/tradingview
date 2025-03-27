@@ -7,11 +7,12 @@ class Base(DeclarativeBase):
 
 class Trade(Base):
     __tablename__ = "trades"
-    id = Column(Integer, primary_key=True, index=True)
-    action = Column(String, nullable=False)
-    symbol = Column(String, nullable=False)
-    price = Column(String, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    id = Column(Integer, primary_key=True)
+    signal_id = Column(String(50), unique=True, index=True)  # Для поиска дубликатов
+    action = Column(String(10), nullable=False)
+    symbol = Column(String(20), nullable=False, index=True)
+    price = Column(String(20), nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
 class DailyReport(Base):
     __tablename__ = "daily_reports"
