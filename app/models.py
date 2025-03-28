@@ -1,20 +1,19 @@
 from sqlalchemy import Column, Integer, String, Numeric, Enum, DateTime, Index
+from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
-from .database import Base  # Импортируем из единого источника
+
+class Base(DeclarativeBase):
+    pass
 
 class Trade(Base):
     __tablename__ = "trades"
-    __table_args__ = (
-        {'extend_existing': True},
-        Index('ix_trade_signal_id', 'signal_id'),
-        Index('ix_trade_timestamp', 'timestamp')
-    )
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True)
-    signal_id = Column(String(50), unique=True, index=True)
+    signal_id = Column(String(50), unique=True, index=True)  # Для поиска дубликатов
     action = Column(Enum('buy', 'sell', name='action_type'))
     symbol = Column(String(20), nullable=False, index=True)
-    price = Column(Numeric(10, 2))
+    price = Column(Numeric(10, 2))  # Вместо String(20)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
 class DailyReport(Base):
@@ -33,3 +32,4 @@ class Counter(Base):
     id = Column(Integer, primary_key=True)
     buy_count = Column(Integer, default=0)
     sell_count = Column(Integer, default=0)
+
