@@ -48,6 +48,42 @@ async def get_validated_data(request: Request):
         raise HTTPException(status_code=400, detail="Invalid request format")
 
 
+def safe_get_action(data: dict) -> str:
+    """Безопасное извлечение действия из данных"""
+    try:
+        strategy = data.get('strategy') or {}
+        order = strategy.get('order') or {}
+        action = order.get('action', '').lower()
+        if action not in ('buy', 'sell'):
+            raise HTTPException(400, detail="Invalid action, must be 'buy' or 'sell'")
+        return action
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error extracting action: {str(e)}")
+        raise HTTPException(400, detail="Invalid action format")
+
+
+def get_market_data_safe(ticker: str) -> dict:
+    """Безопасное получение рыночных данных"""
+    try:
+        symbol = coingecko.extract_symbol(ticker)
+        market_data = coingecko.get_market_data(symbol)
+        return {
+            'market_cap': market_data.get('market_cap', 'N/A'),
+            'volume_24h': market_data.get('volume_24h', 'N/A'),
+            'symbol': symbol
+        }
+    except Exception as e:
+        logger.error(f"CoinGecko error: {str(e)}")
+        symbol = ticker.replace('USDT', '')
+        return {
+            'market_cap': 'N/A',
+            'volume_24h': 'N/A',
+            'symbol': symbol
+        }
+
+
 @router.post("/webhook")
 async def handle_webhook(request: Request, db: Session = Depends(get_db)):
     try:
@@ -73,32 +109,22 @@ async def handle_webhook(request: Request, db: Session = Depends(get_db)):
                 # Получаем или создаем счетчик
                 counter = db.execute(
                     select(Counter).with_for_update()
-                ).scalar_one_or_none() or Counter()
+                ).scalar_one_or_none() or Counter(buy_count=0, sell_count=0)  # Явная инициализация
 
                 # Обработка действия
-                action = data.get('strategy', {}).get('order', {}).get('action', '').lower()
-                if action not in ('buy', 'sell'):
-                    raise HTTPException(400, detail="Invalid action")
+                action = safe_get_action(data)
 
+                # Обновляем счетчик
                 if action == 'buy':
-                    if counter.buy_count is None:  # Добавьте эту проверку
-                        counter.buy_count = 0
-                    counter.buy_count += 1  # Существующая строка
+                    counter.buy_count = (counter.buy_count or 0) + 1
                     emoji = '🟢'
                 else:
-                    if counter.sell_count is None:  # Добавьте эту проверку
-                        counter.sell_count = 0
-                    counter.sell_count += 1  # Существующая строка
+                    counter.sell_count = (counter.sell_count or 0) + 1
                     emoji = '🔴'
 
                 # Получаем данные о монете
-                try:
-                    symbol = coingecko.extract_symbol(data['ticker'])
-                    market_data = coingecko.get_market_data(symbol)
-                except Exception as e:
-                    logger.error(f"CoinGecko error: {str(e)}")
-                    symbol = data['ticker'].replace('USDT', '')
-                    market_data = {'market_cap': 'N/A', 'volume_24h': 'N/A'}
+                market_info = get_market_data_safe(data['ticker'])
+                symbol = market_info['symbol']
 
                 # Создаем сделку
                 trade = Trade(
@@ -110,13 +136,13 @@ async def handle_webhook(request: Request, db: Session = Depends(get_db)):
 
                 db.add_all([counter, trade])
 
-            # Отправляем сообщение после успешного коммита
+            # Формируем и отправляем сообщение
             message = (
                 f"{emoji} *{action.upper()}*\n\n"
                 f"*{symbol}*\n"
                 f"💰 Price: *{data['close']}$*\n"
-                f"🏦 Market Cap: *{coingecko.format_number(market_data['market_cap'])}$*\n"
-                f"📊 24h Vol: *{coingecko.format_number(market_data['volume_24h'])}$*\n\n"
+                f"🏦 Market Cap: *{coingecko.format_number(market_info['market_cap'])}$*\n"
+                f"📊 24h Vol: *{coingecko.format_number(market_info['volume_24h'])}$*\n\n"
                 f"🔗 [Trade on MEXC](https://www.mexc.com/exchange/{symbol}_USDT)"
             )
 
