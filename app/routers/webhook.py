@@ -50,10 +50,15 @@ async def handle_webhook(request: Request, db: Session = Depends(get_db)):
 
         # Обновляем счетчик
         counter = db.query(Counter).first() or Counter()
+        if not counter:
+            counter = Counter(buy_count=0, sell_count=0)
+            db.add(counter)
+
+        # Обновляем счетчик с проверкой на None
         if action == "buy":
-            counter.buy_count += 1
+            counter.buy_count = (counter.buy_count or 0) + 1
         else:
-            counter.sell_count += 1
+            counter.sell_count = (counter.sell_count or 0) + 1
 
         # Получаем данные о монете
         symbol = coingecko.extract_symbol(data["ticker"])
