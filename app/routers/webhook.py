@@ -81,10 +81,14 @@ async def handle_webhook(request: Request, db: Session = Depends(get_db)):
                     raise HTTPException(400, detail="Invalid action")
 
                 if action == 'buy':
-                    counter.buy_count += 1
+                    if counter.buy_count is None:  # Добавьте эту проверку
+                        counter.buy_count = 0
+                    counter.buy_count += 1  # Существующая строка
                     emoji = '🟢'
                 else:
-                    counter.sell_count += 1
+                    if counter.sell_count is None:  # Добавьте эту проверку
+                        counter.sell_count = 0
+                    counter.sell_count += 1  # Существующая строка
                     emoji = '🔴'
 
                 # Получаем данные о монете
