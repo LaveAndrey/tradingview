@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, Enum, DateTime
+from sqlalchemy import Column, Integer, String, Numeric, Enum, DateTime, Index
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
 
@@ -13,6 +13,10 @@ class Trade(Base):
     symbol = Column(String(20), nullable=False, index=True)
     price = Column(Numeric(10, 2))  # Вместо String(20)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    __table_args__ = (
+        Index('ix_trade_signal_id', 'signal_id'),
+        Index('ix_trade_timestamp', 'timestamp')
+    )
 
 class DailyReport(Base):
     __tablename__ = "daily_reports"
