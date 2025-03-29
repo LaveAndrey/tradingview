@@ -26,39 +26,66 @@ logger = logging.getLogger(__name__)
 GOOGLE_SHEETS_CREDENTIALS = BASE_DIR / "credentials.json"
 SPREADSHEET_ID = Config.ID_TABLES
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Контекст жизненного цикла приложения"""
+COLUMN_HEADERS = [
+    "Timestamp",
+    "Ticker",
+    "Price",
+    "Action",
+    "Market Cap",
+    "24h Volume",
+    "Custom Text"
+]
+
+
+def init_google_sheets():
+    """Инициализация подключения к Google Sheets с созданием заголовков"""
+    if not GOOGLE_SHEETS_CREDENTIALS.exists():
+        raise FileNotFoundError(f"Credentials file not found at {GOOGLE_SHEETS_CREDENTIALS}")
+
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+
+    creds = ServiceAccountCredentials.from_json_keyfile_name(
+        str(GOOGLE_SHEETS_CREDENTIALS), scope)
+    client = gspread.authorize(creds)
+
     try:
-        # Проверка файла credentials
-        if not GOOGLE_SHEETS_CREDENTIALS.exists():
-            raise FileNotFoundError(f"Credentials file not found at {GOOGLE_SHEETS_CREDENTIALS}")
+        spreadsheet = client.open_by_key(SPREADSHEET_ID)
+        sheet = spreadsheet.sheet1
 
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
+        # Проверяем и создаем заголовки если нужно
+        existing_headers = sheet.row_values(1)
+        if not existing_headers or existing_headers != COLUMN_HEADERS:
+            if existing_headers:
+                sheet.clear()
+            sheet.insert_row(COLUMN_HEADERS, index=1)
+            logger.info("Created column headers in Google Sheet")
 
-        # Загрузка и авторизация
-        creds = ServiceAccountCredentials.from_json_keyfile_name(
-            str(GOOGLE_SHEETS_CREDENTIALS), scope)
-        client = gspread.authorize(creds)
-
-        # Проверка подключения
-        sheet = client.open_by_key(SPREADSHEET_ID).sheet1
-        sheet.get_all_records()  # Тестовый запрос
-
-        # Сохранение в состоянии приложения
-        app.state.google_sheets = client
-        logger.info("Google Sheets initialized")
+        return client, sheet
 
     except Exception as e:
-        logger.critical(f"Initialization failed: {str(e)}")
+        logger.error(f"Failed to initialize sheet: {str(e)}")
         raise
 
-    yield  # Работа приложения
 
-    logger.info("Application shutdown")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Управление жизненным циклом приложения"""
+    try:
+        client, sheet = init_google_sheets()
+        app.state.google_sheets = client
+        app.state.sheet = sheet
+        logger.info("Google Sheets initialized successfully")
+
+        yield
+
+    except Exception as e:
+        logger.critical(f"Application startup failed: {str(e)}")
+        raise
+    finally:
+        logger.info("Application shutdown")
 
 app = FastAPI(
     lifespan=lifespan,
