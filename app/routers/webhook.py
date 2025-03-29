@@ -1,14 +1,12 @@
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-import hashlib
-import logging
 from datetime import datetime
+import logging
 from app.models import Trade, Counter
 from app.database import get_db
 from app.services.telegram import TelegramBot
 from app.services.coingecko import CoinGeckoService
-from app.config import Config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -22,79 +20,63 @@ class WebhookPayload(BaseModel):
 
 
 @router.post("/webhook")
-async def handle_webhook(request: Request, db: Session = Depends(get_db)):
+async def webhook(request: Request, db: Session = Depends(get_db)):
     try:
-        # Получаем и проверяем данные
+
+        # Получаем данные от TradingView
         data = await request.json()
-        logger.info(f"Received data: {data}")
-        if not all(k in data for k in ["ticker", "close", "strategy"]):
-            raise HTTPException(status_code=400, detail="Missing required fields")
+        logger.info(f"Received data: {data}")  # Логируем полученные данные
+
+        # Извлекаем переменные из данных
+        ticker = data.get('ticker', 'N/A')  # Пример: BTCUSDT.P, ETHUSDT.P и т.д.
+        close = data.get('close', 'N/A')
+        action = data.get('strategy.order.action', 'N/A')
+
+        if action.lower() == 'buy':
+            action_emoji = '🟢'
+        elif action.lower() == 'sell':
+            action_emoji = '🔴'
+        else:
+            action_emoji = '⚪'  # Если действие неизвестно, используем белый кружок
+
+        # Извлекаем символ монеты из тикера (например, BTCUSDT.P → BTC)
+        symbol = coingecko.extract_symbol(ticker)
+        logger.info(f"Extracted symbol: {symbol}")
 
         try:
-            float(data["close"])
+            price = float(close)
         except ValueError:
+            logger.error(f"Invalid price format: {close}")
             raise HTTPException(status_code=400, detail="Invalid price format")
 
-        # Проверяем действие
-        action = data.get("strategy", {}).get("order", {}).get("action", "").lower()
-        if action not in ("buy", "sell"):
-            raise HTTPException(status_code=400, detail="Invalid action")
+        # Получаем капитализацию и объем за 24 часа
+        market_cap, volume_24h = coingecko.get_market_data(symbol)
 
-        # Генерируем ID сделки
-        signal_id = hashlib.sha256(
-            f"{data['ticker']}-{data['close']}-{datetime.utcnow().timestamp()}".encode()
-        ).hexdigest()
-
-        # Проверяем дубликаты
-        if db.query(Trade).filter(Trade.signal_id == signal_id).first():
-            return {"status": "duplicate"}
-
-        # Обновляем счетчик
-        counter = db.query(Counter).first() or Counter()
-        if not counter:
-            counter = Counter(buy_count=0, sell_count=0)
-            db.add(counter)
-
-        # Обновляем счетчик с проверкой на None
-        if action == "buy":
-            counter.buy_count = (counter.buy_count or 0) + 1
-        else:
-            counter.sell_count = (counter.sell_count or 0) + 1
-
-        # Получаем данные о монете
-        symbol = coingecko.extract_symbol(data["ticker"])
-        market_data = coingecko.get_market_data(symbol)
-
-        # Сохраняем сделку
-        trade = Trade(
-            action=action,
-            symbol=symbol,
-            price=data["close"],
-            signal_id=signal_id
+        # Формируем текст сообщения
+        message = (
+            f"{action_emoji} *{action.upper()}* \n\n"
+            f"*{symbol.upper()}*\n\n"
+            f"PRICE - *{price:,.2f}$*\n"
+            f"MARKET CAP - *{coingecko.format_number(market_cap)}$*\n"
+            f"24H VOLUME - *{coingecko.format_number(volume_24h)}$*\n\n"
+            f"Trading on the MEXC exchange - *https://promote.mexc.com/r/scn7giWq*"
         )
 
-        db.add_all([counter, trade])
+        # Отправляем сообщение в Telegram
+        bot = TelegramBot()
+        bot.send_message(message)
+
+        logger.info(f"Message to be sent: {message}")
+
+        # Записываем данные в базу данных
+        trade = Trade(action=action.lower(), symbol=symbol, price=price, timestamp=datetime.utcnow())
+        db.add(trade)
         db.commit()
 
-        # Отправляем уведомление
-        message = (
-            f"{'🟢' if action == 'buy' else '🔴'} *{action.upper()}*\n\n"
-            f"*{symbol}*\n"
-            f"💰 Price: *{data['close']}$*\n"
-            f"🏦 Market Cap: *{coingecko.format_number(market_data['market_cap'])}$*\n"
-            f"📊 24h Vol: *{coingecko.format_number(market_data['volume_24h'])}$*\n\n"
-            f"🔗 Trading on the MEXC exchange - *https://promote.mexc.com/r/scn7giWq*"
-        )
-        TelegramBot.send_message(Config.CHAT_ID_TRADES, message)
-
-        return {
-            "status": "success",
-            "symbol": symbol,
-            "action": action,
-            "price": data["close"]
-        }
+        # Возвращаем успешный ответ
+        return {"status": "success", "message": "Alert processed"}
 
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Internal server error")
+        # Логируем ошибку
+        print("Error:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))

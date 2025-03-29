@@ -1,6 +1,6 @@
 from pycoingecko import CoinGeckoAPI
 import logging
-from typing import Dict, Union
+from typing import Tuple, Optional
 from time import sleep
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ class CoinGeckoService:
         self.retries = retries
         self.delay = delay  # Задержка между попытками
 
-    def get_market_data(self, symbol: str) -> Dict[str, Union[int, float, str]]:
+    def get_market_data(self, symbol: str) -> Tuple[Optional[float], Optional[float]]:
         """Получение рыночных данных из CoinGecko
 
         Возвращает словарь с ключами:
@@ -21,12 +21,7 @@ class CoinGeckoService:
         - symbol
         - error (при наличии ошибки)
         """
-        result = {
-            'market_cap': 'N/A',
-            'volume_24h': 'N/A',
-            'symbol': symbol.upper(),
-            'error': None
-        }
+        market_cap, volume_24h = None, None
 
         for attempt in range(self.retries):
             try:
@@ -45,8 +40,7 @@ class CoinGeckoService:
 
                 if not matching_coins:
                     logger.warning(f"No matches for symbol: {symbol}")
-                    result['error'] = f"No matches for symbol: {symbol}"
-                    return result
+                    return None, None
 
                 # Получаем данные по монете
                 coin_id = matching_coins[0]["id"]
@@ -54,47 +48,39 @@ class CoinGeckoService:
                 market_data = coin_data.get('market_data', {})
 
                 # Извлекаем значения с защитой от ошибок
-                result['market_cap'] = self._safe_get_value(market_data, 'market_cap')
-                result['volume_24h'] = self._safe_get_value(market_data, 'total_volume')
+                market_cap = self._safe_get_numeric_value(market_data, 'market_cap')
+                volume_24h = self._safe_get_numeric_value(market_data, 'total_volume')
 
                 logger.info(
                     f"Successfully fetched data for {symbol.upper()}: "
-                    f"Cap=${self.format_number(result['market_cap'])} "
-                    f"Vol=${self.format_number(result['volume_24h'])}"
+                    f"Cap=${self.format_number(market_cap)} "
+                    f"Vol=${self.format_number(volume_24h)}"
                 )
-                return result
+                return market_data, volume_24h
 
             except Exception as e:
-                error_msg = f"Attempt {attempt + 1} failed: {str(e)}"
-                logger.error(error_msg)
-                result['error'] = error_msg
+                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
                 if attempt < self.retries - 1:
                     sleep(self.delay)
 
-        return result
+        return None, None
 
     def _safe_get_coins_list(self) -> list:
         """Безопасное получение списка монет"""
         try:
-            coins_list = self.cg.get_coins_list()
-            if not isinstance(coins_list, list):
-                logger.warning("Invalid coins list format")
-                return []
-            return coins_list
+            return self.cg.get_coins_list() or []
         except Exception as e:
             logger.error(f"Error getting coins list: {str(e)}")
             return []
 
-    def _safe_get_value(self, market_data: dict, key: str) -> Union[int, float, str]:
+    def _safe_get_numeric_value(self, market_data: dict, key: str) -> Optional[float]:
         """Безопасное извлечение числового значения"""
         try:
             value = market_data.get(key, {}).get('usd')
-            if isinstance(value, (int, float)):
-                return int(value) if value == int(value) else round(value, 2)
-            return 'N/A'
+            return float(value) if value is not None else None
         except Exception as e:
             logger.warning(f"Error extracting {key}: {str(e)}")
-            return 'N/A'
+            return None
 
     @staticmethod
     def extract_symbol(ticker: str) -> str:
@@ -110,8 +96,8 @@ class CoinGeckoService:
         return ticker
 
     @staticmethod
-    def format_number(value: Union[int, float, str], default: str = "N/A") -> str:
+    def format_number(value: Optional[float], default: str = "N/A") -> str:
         """Форматирование чисел с разделителями"""
-        if isinstance(value, (int, float)):
-            return f"{int(value):,}" if value == int(value) else f"{value:,.2f}"
-        return default
+        if value is None:
+            return default
+        return f"{int(value):,}" if value == int(value) else f"{value:,.2f}"

@@ -8,7 +8,6 @@ class Trade(Base):
     __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True)
-    signal_id = Column(String(50), unique=True, index=True)  # Для поиска дубликатов
     action = Column(Enum('buy', 'sell', name='action_type'))
     symbol = Column(String(20), nullable=False, index=True)
     price = Column(Numeric(10, 2))  # Вместо String(20)
