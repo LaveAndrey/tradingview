@@ -7,8 +7,6 @@ WORKDIR /app
 # Копируем зависимости
 COPY requirements.txt .
 
-COPY credentials.json ./credentials.json
-
 # Устанавливаем зависимости
 RUN pip install -r requirements.txt
 
