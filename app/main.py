@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 # Базовый путь проекта
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent
 
 # Настройка логирования (только в main.py)
 logging.basicConfig(
