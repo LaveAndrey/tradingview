@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 coingecko = CoinGeckoService()
 
 # Настройки Google Sheets
-GOOGLE_SHEETS_CREDENTIALS = "credentials.json"  # Путь к файлу сервисного аккаунта
+GOOGLE_SHEETS_CREDENTIALS = "/app/credentials.json"  # Путь к файлу сервисного аккаунта
 SPREADSHEET_ID = Config.ID_TABLES  # ID вашей Google Таблицы
 
 # Авторизация в Google Sheets

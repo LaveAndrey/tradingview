@@ -19,7 +19,7 @@ logging.basicConfig(
 )
 
 # Конфигурация Google Sheets
-GOOGLE_SHEETS_CREDENTIALS = "credentials.json"
+GOOGLE_SHEETS_CREDENTIALS = "/app/credentials.json"
 SPREADSHEET_ID = Config.ID_TABLES
 
 
