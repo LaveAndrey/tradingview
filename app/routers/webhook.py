@@ -26,6 +26,7 @@ async def handle_webhook(request: Request, db: Session = Depends(get_db)):
     try:
         # Получаем и проверяем данные
         data = await request.json()
+        logger.info(f"Received data: {data}")
         if not all(k in data for k in ["ticker", "close", "strategy"]):
             raise HTTPException(status_code=400, detail="Missing required fields")
 
