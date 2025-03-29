@@ -1,14 +1,14 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from routers.webhook import router as webhook_router
-from services.sheduler import start_scheduler
-from app.database import create_db
-from app.models import Trade, DailyReport, Counter
+from app.config import Config
 import logging
-
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 logger = logging.getLogger(__name__)
 
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -18,39 +18,44 @@ logging.basicConfig(
     ]
 )
 
+# Конфигурация Google Sheets
+GOOGLE_SHEETS_CREDENTIALS = "credentials.json"
+SPREADSHEET_ID = Config.ID_TABLES
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Инициализация при запуске
-    logger.info("Creating database tables...")
+    # Инициализация подключения к Google Таблицам
+    logger.info("Initializing Google Sheets connection...")
     try:
-        # Для синхронного движка (как у вас в database.py)
-        create_db()
-        logger.info("Database tables created successfully")
+        scope = ["https://spreadsheets.google.com/feeds",
+                 "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            GOOGLE_SHEETS_CREDENTIALS, scope)
+        client = gspread.authorize(creds)
 
+        # Проверяем доступ к таблице
+        sheet = client.open_by_key(SPREADSHEET_ID).sheet1
+        logger.info("Successfully connected to Google Sheets")
+
+        # Сохраняем клиент в состоянии приложения
+        app.state.google_sheets = client
+        app.state.sheet = sheet
 
     except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
+        logger.error(f"Google Sheets initialization failed: {e}")
         raise
-
-    # Запуск планировщика
-    try:
-        start_scheduler()
-        logger.info("Scheduler started successfully")
-    except Exception as e:
-        logger.error(f"Failed to start scheduler: {e}")
 
     yield  # Здесь работает приложение
 
     # Завершение работы
-    logger.info("Shutting down application...")
+    logger.info("Application shutting down")
 
-
-logger.info("BD create")
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(webhook_router)
 
 if __name__ == '__main__':
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=5000)

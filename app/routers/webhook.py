@@ -1,10 +1,9 @@
-from fastapi import APIRouter, Request, HTTPException, Depends
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
 import logging
-from app.database import get_db
-from app.models import Trade
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from app.services.telegram import TelegramBot
 from app.services.coingecko import CoinGeckoService
 from app.config import Config
@@ -13,34 +12,37 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 coingecko = CoinGeckoService()
 
+# Настройки Google Sheets
+GOOGLE_SHEETS_CREDENTIALS = "credentials.json"  # Путь к файлу сервисного аккаунта
+SPREADSHEET_ID = Config.ID_TABLES  # ID вашей Google Таблицы
+
+# Авторизация в Google Sheets
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_SHEETS_CREDENTIALS, scope)
+client = gspread.authorize(creds)
+sheet = client.open_by_key(SPREADSHEET_ID).sheet1  # Используем первый лист
 
 class WebhookPayload(BaseModel):
     ticker: str
     close: str
     strategy: dict
 
-
 @router.post("/webhook")
-async def webhook(request: Request, db: Session = Depends(get_db)):
+async def webhook(request: Request):
     try:
-
         # Получаем данные от TradingView
         data = await request.json()
-        logger.info(f"Received data: {data}")  # Логируем полученные данные
+        logger.info(f"Received data: {data}")
 
-        # Извлекаем переменные из данных
-        ticker = data.get('ticker', 'N/A')  # Пример: BTCUSDT.P, ETHUSDT.P и т.д.
+        # Извлекаем переменные
+        ticker = data.get('ticker', 'N/A')
         close = data.get('close', 'N/A')
         action = data.get('strategy.order.action', 'N/A')
 
-        if action.lower() == 'buy':
-            action_emoji = '🟢'
-        elif action.lower() == 'sell':
-            action_emoji = '🔴'
-        else:
-            action_emoji = '⚪'  # Если действие неизвестно, используем белый кружок
+        # Эмодзи для действия
+        action_emoji = '🟢' if action.lower() == 'buy' else '🔴' if action.lower() == 'sell' else '⚪'
 
-        # Извлекаем символ монеты из тикера (например, BTCUSDT.P → BTC)
+        # Получаем символ монеты
         symbol = coingecko.extract_symbol(ticker.lower())
         logger.info(f"Extracted symbol: {symbol.lower()}")
 
@@ -50,10 +52,10 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             logger.error(f"Invalid price format: {close}")
             raise HTTPException(status_code=400, detail="Invalid price format")
 
-        # Получаем капитализацию и объем за 24 часа
+        # Получаем рыночные данные
         market_cap, volume_24h = coingecko.get_market_data(symbol)
 
-        # Формируем текст сообщения
+        # Формируем сообщение для Telegram
         message = (
             f"{action_emoji} *{action.upper()}* \n\n"
             f"*{symbol.upper()}*\n\n"
@@ -63,23 +65,29 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             f"Trading on the MEXC exchange - *https://promote.mexc.com/r/scn7giWq*"
         )
 
+        # Отправляем в Telegram
         try:
-            TelegramBot.send_message(text=message, chat_id=Config.CHAT_ID_TRADES)  # Явно указываем параметр
+            TelegramBot.send_message(text=message, chat_id=Config.CHAT_ID_TRADES)
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
             raise HTTPException(status_code=500, detail="Failed to send notification")
 
-        logger.info(f"Message to be sent: {message}")
+        # Записываем данные в Google Таблицу
+        try:
+            sheet.append_row([
+                datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                action.lower(),
+                symbol.upper(),
+                price,
+                market_cap,
+                volume_24h
+            ])
+        except Exception as e:
+            logger.error(f"Failed to write to Google Sheets: {e}")
+            raise HTTPException(status_code=500, detail="Failed to save data")
 
-        # Записываем данные в базу данных
-        trade = Trade(action=action.lower(), symbol=symbol, price=price, timestamp=datetime.utcnow())
-        db.add(trade)
-        db.commit()
-
-        # Возвращаем успешный ответ
         return {"status": "success", "message": "Alert processed"}
 
     except Exception as e:
-        # Логируем ошибку
-        print("Error:", str(e))
+        logger.error(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
