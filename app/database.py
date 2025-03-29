@@ -3,6 +3,13 @@ from sqlalchemy import Column, Integer, String, Numeric, Enum, DateTime
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.config import Config
 from datetime import datetime
+import os
+
+DB_PATH = "/tmp/trades.sqlite"
+
+if not os.path.exists(DB_PATH):
+    with open(DB_PATH, 'w') as f:
+        os.chmod(DB_PATH, 0o666)
 
 # Для SQLite
 engine = create_engine(
