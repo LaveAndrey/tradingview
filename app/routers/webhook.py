@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Dict
+import asyncio
 import logging
 from app.services.telegram import TelegramBot
 from app.services.coingecko import CoinGeckoService
@@ -13,6 +15,51 @@ coingecko = CoinGeckoService()
 # Настройки Google Sheets
 SPREADSHEET_ID = Config.ID_TABLES  # ID вашей Google Таблицы
 
+update_tasks: Dict[str, asyncio.Task] = {}
+
+
+async def update_price_periodically(sheet, row_index: int, symbol: str, signal_price: float):
+    """Фоновая задача для периодического обновления цен"""
+    try:
+        intervals = [
+            ('15m', 15 * 60),
+            ('1h', 60 * 60),
+            ('4h', 4 * 60 * 60),
+            ('1d', 24 * 60 * 60)
+        ]
+
+        while True:
+            current_price = coingecko.get_current_price(symbol)
+
+            # Обновляем все интервалы, для которых прошло достаточно времени
+            for interval_name, interval_seconds in intervals:
+                # Получаем время сигнала из колонки D (4-я колонка)
+                signal_time_str = sheet.cell(row_index, 4).value
+                signal_time = datetime.strptime(signal_time_str, "%Y-%m-%d %H:%M:%S")
+                time_passed = (datetime.utcnow() - signal_time).total_seconds()
+
+                if time_passed >= interval_seconds:
+                    # Определяем позиции колонок
+                    close_col = 5 + intervals.index((interval_name, interval_seconds)) * 2
+                    change_col = close_col + 1
+
+                    # Если ячейка ещё не заполнена
+                    if not sheet.cell(row_index, close_col).value:
+                        # Рассчитываем изменение
+                        price_change = ((current_price - signal_price) / signal_price) * 100
+
+                        # Обновляем таблицу
+                        sheet.update_cell(row_index, close_col, current_price)
+                        sheet.update_cell(row_index, change_col, f"{price_change:.2f}%")
+
+            # Проверяем обновления каждую минуту
+            await asyncio.sleep(60)
+
+    except Exception as e:
+        logger.error(f"Price update task failed: {e}")
+        # Удаляем задачу при ошибке
+        if symbol in update_tasks:
+            update_tasks.pop(symbol)
 
 class WebhookPayload(BaseModel):
     ticker: str
@@ -82,13 +129,20 @@ async def webhook(request: Request):
         # Записываем данные в Google Таблицу
         try:
             sheet.append_row([
-                datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                action.lower(),
                 symbol.upper(),
+                action.lower(),
                 price,
-                market_cap,
-                volume_24h
+                datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                "", "", "", "", "", "", "", ""
             ])
+
+            row_index = len(sheet.get_all_values())
+
+            task = asyncio.create_task(
+                update_price_periodically(sheet, row_index, symbol, float(price))
+            )
+            update_tasks[symbol] = task
+
         except Exception as e:
             logger.error(f"Failed to write to Google Sheets: {e}")
             raise HTTPException(status_code=500, detail="Failed to save data")

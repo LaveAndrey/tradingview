@@ -94,3 +94,41 @@ class CoinGeckoService:
         if value is None:
             return default
         return f"{int(value):,}" if value == int(value) else f"{value:,.2f}"
+
+    def get_current_price(self, symbol: str) -> float:
+        for attempt in range(self.retries):
+            try:
+                # Получаем список всех монет и ищем нужную
+                coins_list = self._safe_get_coins_list()
+                if not coins_list:
+                    continue
+
+                matching_coins = [
+                    c for c in coins_list
+                    if c.get("symbol", "").lower() == symbol.lower()
+                ]
+
+                if not matching_coins:
+                    raise ValueError(f"Symbol {symbol} not found in CoinGecko")
+
+                coin_id = matching_coins[0]["id"]
+
+                # Получаем цену с повторными попытками
+                price_data = self.cg.get_price(ids=coin_id, vs_currencies='usd')
+
+                if not price_data or coin_id not in price_data:
+                    raise ValueError(f"No price data available for {symbol}")
+
+                price = price_data[coin_id].get("usd")
+                if price is None:
+                    raise ValueError(f"USD price not available for {symbol}")
+
+                logger.info(f"Successfully fetched price for {symbol.upper()}: ${price}")
+                return float(price)
+
+            except Exception as e:
+                logger.error(f"Attempt {attempt + 1} failed for {symbol}: {str(e)}")
+                if attempt < self.retries - 1:
+                    sleep(self.delay)
+
+        raise Exception(f"Failed to get price for {symbol} after {self.retries} attempts")

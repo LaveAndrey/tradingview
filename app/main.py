@@ -27,13 +27,18 @@ GOOGLE_SHEETS_CREDENTIALS = BASE_DIR / "credentials.json"
 SPREADSHEET_ID = Config.ID_TABLES
 
 COLUMN_HEADERS = [
-    "Timestamp",
-    "Ticker",
-    "Price",
-    "Action",
-    "Market Cap",
-    "24h Volume",
-    "Custom Text"
+    "Тикер",
+    "Действие",
+    "Цена по сигналу",
+    "Дата и время сигнала",
+    "Закрытие 15m",
+    "Рост/падение 15m",
+    "Закрытие 1h",
+    "Рост/падение 1h",
+    "Закрытие 4h",
+    "Рост/падение 4h",
+    "Закрытие 1d",
+    "Рост/падение 1d",
 ]
 
 
@@ -70,6 +75,7 @@ def init_google_sheets():
         raise
 
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения"""
@@ -79,7 +85,15 @@ async def lifespan(app: FastAPI):
         app.state.sheet = sheet
         logger.info("Google Sheets initialized successfully")
 
+        app.state.background_tasks = set()
+        app.state.update_tasks = {}
+
         yield
+
+        for task in app.state.background_tasks:
+            task.cancel()
+        for task in app.state.update_tasks.values():
+            task.cancel()
 
     except Exception as e:
         logger.critical(f"Application startup failed: {str(e)}")
