@@ -15,11 +15,7 @@ class CoinGeckoService:
     def get_market_data(self, symbol: str) -> Tuple[Optional[float], Optional[float]]:
         """Получение рыночных данных из CoinGecko
 
-        Возвращает словарь с ключами:
-        - market_cap
-        - volume_24h
-        - symbol
-        - error (при наличии ошибки)
+        Возвращает кортеж: (market_cap, volume_24h)
         """
         market_cap, volume_24h = None, None
 
@@ -27,12 +23,10 @@ class CoinGeckoService:
             try:
                 logger.info(f"Fetching data for {symbol.upper()} (attempt {attempt + 1}/{self.retries})")
 
-                # Получаем список монет с обработкой ошибок
                 coins_list = self._safe_get_coins_list()
                 if not coins_list:
                     continue
 
-                # Находим совпадения
                 matching_coins = [
                     c for c in coins_list
                     if c.get("symbol", "").lower() == symbol.lower()
@@ -42,12 +36,11 @@ class CoinGeckoService:
                     logger.warning(f"No matches for symbol: {symbol}")
                     return None, None
 
-                # Получаем данные по монете
                 coin_id = matching_coins[0]["id"]
                 coin_data = self.cg.get_coin_by_id(coin_id)
                 market_data = coin_data.get('market_data', {})
 
-                # Извлекаем значения с защитой от ошибок
+                # Исправлено: извлекаем конкретные значения
                 market_cap = self._safe_get_numeric_value(market_data, 'market_cap')
                 volume_24h = self._safe_get_numeric_value(market_data, 'total_volume')
 
@@ -56,7 +49,7 @@ class CoinGeckoService:
                     f"Cap=${self.format_number(market_cap)} "
                     f"Vol=${self.format_number(volume_24h)}"
                 )
-                return market_data, volume_24h
+                return market_cap, volume_24h  # Теперь возвращаем только числа
 
             except Exception as e:
                 logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
