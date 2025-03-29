@@ -2,8 +2,6 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
 import logging
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from app.services.telegram import TelegramBot
 from app.services.coingecko import CoinGeckoService
 from app.config import Config
@@ -13,26 +11,34 @@ logger = logging.getLogger(__name__)
 coingecko = CoinGeckoService()
 
 # Настройки Google Sheets
-GOOGLE_SHEETS_CREDENTIALS = "/app/credentials.json"  # Путь к файлу сервисного аккаунта
 SPREADSHEET_ID = Config.ID_TABLES  # ID вашей Google Таблицы
 
-# Авторизация в Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_SHEETS_CREDENTIALS, scope)
-client = gspread.authorize(creds)
-sheet = client.open_by_key(SPREADSHEET_ID).sheet1  # Используем первый лист
 
 class WebhookPayload(BaseModel):
     ticker: str
     close: str
     strategy: dict
 
+
 @router.post("/webhook")
 async def webhook(request: Request):
     try:
-        # Получаем данные от TradingView
+        # Проверка инициализации клиента
+        if not hasattr(request.app.state, 'google_sheets'):
+            logger.error("Google Sheets client not initialized")
+            raise HTTPException(status_code=503, detail="Service unavailable")
+
+        client = request.app.state.google_sheets
+
+        try:
+            sheet = client.open_by_key(SPREADSHEET_ID).sheet1
+        except Exception as e:
+            logger.error(f"Sheet access error: {str(e)}")
+            raise HTTPException(status_code=500, detail="Spreadsheet access error")
+
+        # Обработка данных...
         data = await request.json()
-        logger.info(f"Received data: {data}")
+        logger.info(f"Processing data: {data}")
 
         # Извлекаем переменные
         ticker = data.get('ticker', 'N/A')
@@ -88,6 +94,8 @@ async def webhook(request: Request):
 
         return {"status": "success", "message": "Alert processed"}
 
+    except HTTPException:
+        raise  # Пробрасываем уже обработанные ошибки
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")

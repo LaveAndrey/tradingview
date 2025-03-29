@@ -5,57 +5,68 @@ from app.config import Config
 import logging
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import os
+from pathlib import Path
 
-logger = logging.getLogger(__name__)
+# Базовый путь проекта
+BASE_DIR = Path(__file__).parent
 
-# Настройка логирования
+# Настройка логирования (только в main.py)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('webhooks.log')
+        logging.FileHandler(BASE_DIR / 'webhooks.log')
     ]
 )
+logger = logging.getLogger(__name__)
 
 # Конфигурация Google Sheets
-GOOGLE_SHEETS_CREDENTIALS = "/app/credentials.json"
+GOOGLE_SHEETS_CREDENTIALS = BASE_DIR / "credentials.json"
 SPREADSHEET_ID = Config.ID_TABLES
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Инициализация подключения к Google Таблицам
-    logger.info("Initializing Google Sheets connection...")
+    """Контекст жизненного цикла приложения"""
     try:
-        scope = ["https://spreadsheets.google.com/feeds",
-                 "https://www.googleapis.com/auth/drive"]
+        # Проверка файла credentials
+        if not GOOGLE_SHEETS_CREDENTIALS.exists():
+            raise FileNotFoundError(f"Credentials file not found at {GOOGLE_SHEETS_CREDENTIALS}")
+
+        scope = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive"
+        ]
+
+        # Загрузка и авторизация
         creds = ServiceAccountCredentials.from_json_keyfile_name(
-            GOOGLE_SHEETS_CREDENTIALS, scope)
+            str(GOOGLE_SHEETS_CREDENTIALS), scope)
         client = gspread.authorize(creds)
 
-        # Проверяем доступ к таблице
+        # Проверка подключения
         sheet = client.open_by_key(SPREADSHEET_ID).sheet1
-        logger.info("Successfully connected to Google Sheets")
+        sheet.get_all_records()  # Тестовый запрос
 
-        # Сохраняем клиент в состоянии приложения
+        # Сохранение в состоянии приложения
         app.state.google_sheets = client
-        app.state.sheet = sheet
+        logger.info("Google Sheets initialized")
 
     except Exception as e:
-        logger.error(f"Google Sheets initialization failed: {e}")
+        logger.critical(f"Initialization failed: {str(e)}")
         raise
 
-    yield  # Здесь работает приложение
+    yield  # Работа приложения
 
-    # Завершение работы
-    logger.info("Application shutting down")
+    logger.info("Application shutdown")
 
+app = FastAPI(
+    lifespan=lifespan,
+    title="TradingView Webhook Processor"
+)
 
-app = FastAPI(lifespan=lifespan)
 app.include_router(webhook_router)
 
 if __name__ == '__main__':
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=5000)
