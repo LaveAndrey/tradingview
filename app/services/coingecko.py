@@ -21,7 +21,7 @@ class CoinGeckoService:
 
         for attempt in range(self.retries):
             try:
-                logger.info(f"Fetching data for {symbol.upper()} (attempt {attempt + 1}/{self.retries})")
+                logger.info(f"Fetching data for {symbol.lower()} (attempt {attempt + 1}/{self.retries})")
 
                 coins_list = self._safe_get_coins_list()
                 if not coins_list:
@@ -45,7 +45,7 @@ class CoinGeckoService:
                 volume_24h = self._safe_get_numeric_value(market_data, 'total_volume')
 
                 logger.info(
-                    f"Successfully fetched data for {symbol.upper()}: "
+                    f"Successfully fetched data for {symbol.lower()}: "
                     f"Cap=${self.format_number(market_cap)} "
                     f"Vol=${self.format_number(volume_24h)}"
                 )

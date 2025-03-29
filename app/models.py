@@ -30,3 +30,5 @@ class Counter(Base):
     buy_count = Column(Integer, default=0)
     sell_count = Column(Integer, default=0)
 
+
+

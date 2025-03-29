@@ -42,7 +42,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
         # Извлекаем символ монеты из тикера (например, BTCUSDT.P → BTC)
         symbol = coingecko.extract_symbol(ticker.lower())
-        logger.info(f"Extracted symbol: {symbol}")
+        logger.info(f"Extracted symbol: {symbol.lower()}")
 
         try:
             price = float(close)
