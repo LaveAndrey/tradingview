@@ -7,6 +7,7 @@ from app.models import Trade, Counter
 from app.database import get_db
 from app.services.telegram import TelegramBot
 from app.services.coingecko import CoinGeckoService
+from app.config import Config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         )
 
         try:
-            TelegramBot.send_message(message)  # Явно указываем параметр
+            TelegramBot.send_message(text=message, chat_id=Config.CHAT_ID_TRADES)  # Явно указываем параметр
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
             raise HTTPException(status_code=500, detail="Failed to send notification")
