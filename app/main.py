@@ -2,8 +2,8 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from routers.webhook import router as webhook_router
 from services.sheduler import start_scheduler
-from app.database import Base, engine
-from sqlalchemy import text
+from app.database import create_db
+from app.models import Trade, DailyReport, Counter
 import logging
 
 
@@ -25,13 +25,9 @@ async def lifespan(app: FastAPI):
     logger.info("Creating database tables...")
     try:
         # Для синхронного движка (как у вас в database.py)
-        Base.metadata.create_all(bind=engine)
+        create_db()
         logger.info("Database tables created successfully")
 
-        # Простая проверка подключения
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-            logger.info("Database connection test passed")
 
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")

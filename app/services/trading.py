@@ -1,6 +1,6 @@
 from datetime import datetime
 from pytz import timezone
-from app.database import Counter, DailyReport
+from app.models import Counter, DailyReport
 from app.services.telegram import TelegramBot
 from app.config import Config
 import logging

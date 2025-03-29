@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from datetime import datetime
 import logging
-from app.database import Trade
 from app.database import get_db
+from app.models import Trade
 from app.services.telegram import TelegramBot
 from app.services.coingecko import CoinGeckoService
 from app.config import Config
