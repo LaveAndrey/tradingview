@@ -41,7 +41,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             action_emoji = '⚪'  # Если действие неизвестно, используем белый кружок
 
         # Извлекаем символ монеты из тикера (например, BTCUSDT.P → BTC)
-        symbol = coingecko.extract_symbol(ticker)
+        symbol = coingecko.extract_symbol(ticker.lower())
         logger.info(f"Extracted symbol: {symbol}")
 
         try:
@@ -57,7 +57,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         message = (
             f"{action_emoji} *{action.upper()}* \n\n"
             f"*{symbol.upper()}*\n\n"
-            f"PRICE - *{price:,.2f}$*\n"
+            f"PRICE - *{price}$*\n"
             f"MARKET CAP - *{coingecko.format_number(market_cap)}$*\n"
             f"24H VOLUME - *{coingecko.format_number(volume_24h)}$*\n\n"
             f"Trading on the MEXC exchange - *https://promote.mexc.com/r/scn7giWq*"
