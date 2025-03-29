@@ -63,8 +63,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         )
 
         try:
-            bot = TelegramBot()
-            bot.send_message(text=message)  # Явно указываем параметр
+            TelegramBot.send_message(message)  # Явно указываем параметр
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
             raise HTTPException(status_code=500, detail="Failed to send notification")
