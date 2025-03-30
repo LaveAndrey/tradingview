@@ -167,13 +167,13 @@ def format_cell(sheet, row: int, col: int, value: float):
             # Зелёный фон для положительных значений
             sheet.format(
                 cell_reference,
-                {"backgroundColor": {"red": 0.85, "green": 0.95, "blue": 0.85}}
+                {"backgroundColor": {"red": 0, "green": 1, "blue": 0}}
             )
         else:
             # Красный фон для отрицательных значений
             sheet.format(
                 cell_reference,
-                {"backgroundColor": {"red": 0.95, "green": 0.85, "blue": 0.85}}
+                {"backgroundColor": {"red": 1, "green": 0, "blue": 0}}
             )
     except Exception as e:
         logger.error(f"Failed to format cell: {e}")
