@@ -1,134 +1,91 @@
 from pycoingecko import CoinGeckoAPI
 import logging
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 from time import sleep
+import asyncio
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
-
 
 class CoinGeckoService:
     def __init__(self, retries: int = 3, delay: float = 1.0):
         self.cg = CoinGeckoAPI()
         self.retries = retries
-        self.delay = delay  # Задержка между попытками
+        self.delay = delay
+        self._coin_cache = {}  # Кэш для хранения данных о монетах
 
-    def get_market_data(self, symbol: str) -> Tuple[Optional[float], Optional[float]]:
-        """Получение рыночных данных из CoinGecko
-
-        Возвращает кортеж: (market_cap, volume_24h)
-        """
-        market_cap, volume_24h = None, None
-
-        for attempt in range(self.retries):
+    async def _get_all_coins(self) -> Dict:
+        """Получает и кэширует список всех монет с их ID"""
+        if not self._coin_cache:
             try:
-                logger.info(f"Fetching data for {symbol.upper()} (attempt {attempt + 1}/{self.retries})")
-
-                coins_list = self._safe_get_coins_list()
-                if not coins_list:
-                    continue
-
-                matching_coins = [
-                    c for c in coins_list
-                    if c.get("symbol", "").lower() == symbol.lower()
-                ]
-
-                if not matching_coins:
-                    logger.warning(f"No matches for symbol: {symbol}")
-                    return None, None
-
-                coin_id = matching_coins[0]["id"]
-                coin_data = self.cg.get_coin_by_id(coin_id)
-                market_data = coin_data.get('market_data', {})
-
-                # Исправлено: извлекаем конкретные значения
-                market_cap = self._safe_get_numeric_value(market_data, 'market_cap')
-                volume_24h = self._safe_get_numeric_value(market_data, 'total_volume')
-
-                logger.info(
-                    f"Successfully fetched data for {symbol.upper()}: "
-                    f"Cap=${self.format_number(market_cap)} "
-                    f"Vol=${self.format_number(volume_24h)}"
-                )
-                return market_cap, volume_24h  # Теперь возвращаем только числа
-
+                coins = self.cg.get_coins_list()
+                self._coin_cache = {coin['symbol']: coin for coin in coins}
+                logger.info("Кэш монет успешно обновлен")
             except Exception as e:
-                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-                if attempt < self.retries - 1:
-                    sleep(self.delay)
+                logger.error(f"Ошибка получения списка монет: {e}")
+                raise
+        return self._coin_cache
 
-        return None, None
-
-    def _safe_get_coins_list(self) -> list:
-        """Безопасное получение списка монет"""
+    async def get_market_data(self, symbol: str) -> Tuple[Optional[float], Optional[float]]:
+        """Получает рыночные данные с кэшированием"""
         try:
-            return self.cg.get_coins_list() or []
-        except Exception as e:
-            logger.error(f"Error getting coins list: {str(e)}")
-            return []
+            coins = await self._get_all_coins()
+            coin_data = coins.get(symbol.lower())
+            if not coin_data:
+                logger.warning(f"Монета {symbol} не найдена")
+                return None, None
 
-    def _safe_get_numeric_value(self, market_data: dict, key: str) -> Optional[float]:
-        """Безопасное извлечение числового значения"""
-        try:
-            value = market_data.get(key, {}).get('usd')
-            return float(value) if value is not None else None
+            for attempt in range(self.retries):
+                try:
+                    data = self.cg.get_coin_by_id(coin_data['id'])
+                    market_data = data.get('market_data', {})
+                    market_cap = market_data.get('market_cap', {}).get('usd')
+                    volume = market_data.get('total_volume', {}).get('usd')
+                    return market_cap, volume
+                except Exception as e:
+                    logger.error(f"Попытка {attempt + 1} не удалась: {e}")
+                    if attempt < self.retries - 1:
+                        await asyncio.sleep(self.delay)
+
+            return None, None
         except Exception as e:
-            logger.warning(f"Error extracting {key}: {str(e)}")
-            return None
+            logger.error(f"Ошибка в get_market_data: {e}")
+            return None, None
+
+    async def get_current_price(self, symbol: str) -> float:
+        """Получает текущую цену с кэшированием ID"""
+        try:
+            coins = await self._get_all_coins()
+            coin_data = coins.get(symbol.lower())
+            if not coin_data:
+                raise ValueError(f"Монета {symbol} не найдена")
+
+            for attempt in range(self.retries):
+                try:
+                    price = self.cg.get_price(ids=coin_data['id'], vs_currencies='usd')
+                    return float(price[coin_data['id']]['usd'])
+                except Exception as e:
+                    logger.error(f"Попытка {attempt + 1} не удалась: {e}")
+                    if attempt < self.retries - 1:
+                        await asyncio.sleep(self.delay)
+
+            raise Exception(f"Не удалось получить цену для {symbol}")
+        except Exception as e:
+            logger.error(f"Ошибка в get_current_price: {e}")
+            raise
 
     @staticmethod
     def extract_symbol(ticker: str) -> str:
-        """Извлечение символа из тикера"""
-        if not isinstance(ticker, str):
-            logger.warning(f"Invalid ticker type: {type(ticker)}")
-            return ''
-
+        """Извлекает чистый символ из тикера"""
         ticker = ticker.upper()
-        for suffix in ["USDT.P", "USDT"]:
+        for suffix in ["USDT.P", "USDT", "PERP", "USD.P"]:
             if ticker.endswith(suffix):
                 return ticker[:-len(suffix)]
         return ticker
 
     @staticmethod
-    def format_number(value: Optional[float], default: str = "N/A") -> str:
-        """Форматирование чисел с разделителями"""
+    def format_number(value: Optional[float]) -> str:
+        """Форматирует числа с разделителями"""
         if value is None:
-            return default
-        return f"{int(value):,}" if value == int(value) else f"{value:,.2f}"
-
-    def get_current_price(self, symbol: str) -> float:
-        for attempt in range(self.retries):
-            try:
-                # Получаем список всех монет и ищем нужную
-                coins_list = self._safe_get_coins_list()
-                if not coins_list:
-                    continue
-
-                matching_coins = [
-                    c for c in coins_list
-                    if c.get("symbol", "").lower() == symbol.lower()
-                ]
-
-                if not matching_coins:
-                    raise ValueError(f"Symbol {symbol} not found in CoinGecko")
-
-                coin_id = matching_coins[0]["id"]
-
-                # Получаем цену с повторными попытками
-                price_data = self.cg.get_price(ids=coin_id, vs_currencies='usd')
-
-                if not price_data or coin_id not in price_data:
-                    raise ValueError(f"No price data available for {symbol}")
-
-                price = price_data[coin_id].get("usd")
-                if price is None:
-                    raise ValueError(f"USD price not available for {symbol}")
-
-                logger.info(f"Successfully fetched price for {symbol.upper()}: ${price}")
-                return float(price)
-
-            except Exception as e:
-                logger.error(f"Attempt {attempt + 1} failed for {symbol}: {str(e)}")
-                if attempt < self.retries - 1:
-                    sleep(self.delay)
-
-        raise Exception(f"Failed to get price for {symbol} after {self.retries} attempts")
+            return "N/A"
+        return f"{value:,.2f}" if isinstance(value, float) else f"{int(value):,}"

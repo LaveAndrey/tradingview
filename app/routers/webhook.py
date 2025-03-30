@@ -7,6 +7,7 @@ import logging
 from app.services.telegram import TelegramBot
 from app.services.coingecko import CoinGeckoService
 from app.config import Config
+import pytz
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ SPREADSHEET_ID = Config.ID_TABLES  # ID вашей Google Таблицы
 update_tasks: Dict[str, asyncio.Task] = {}
 
 
-async def update_price_periodically(sheet, row_index: int, symbol: str, signal_price: float):
+async def update_price_periodically(sheet, row_index: int, symbol: str, signal_price: float, action: str):
     """Фоновая задача для периодического обновления цен"""
     try:
         intervals = [
@@ -29,37 +30,58 @@ async def update_price_periodically(sheet, row_index: int, symbol: str, signal_p
         ]
 
         while True:
-            current_price = coingecko.get_current_price(symbol)
+            try:
+                current_price = await coingecko.get_current_price(symbol)
 
-            # Обновляем все интервалы, для которых прошло достаточно времени
-            for interval_name, interval_seconds in intervals:
-                # Получаем время сигнала из колонки D (4-я колонка)
+                if action.lower() == 'buy':
+                    price_change = ((current_price - signal_price) / signal_price) * 100  # Лонг
+                else:
+                    price_change = ((signal_price - current_price) / signal_price) * 100  # Шорт
+
+                # Обновляем все интервалы, для которых прошло достаточно времени
                 signal_time_str = sheet.cell(row_index, 4).value
                 signal_time = datetime.strptime(signal_time_str, "%Y-%m-%d %H:%M:%S")
                 time_passed = (datetime.utcnow() - signal_time).total_seconds()
 
-                if time_passed >= interval_seconds:
-                    # Определяем позиции колонок
-                    close_col = 5 + intervals.index((interval_name, interval_seconds)) * 2
-                    change_col = close_col + 1
+                for interval_name, interval_seconds in intervals:
+                    if time_passed >= interval_seconds:
+                        close_col = 5 + intervals.index((interval_name, interval_seconds)) * 2
+                        change_col = close_col + 1
 
-                    # Если ячейка ещё не заполнена
-                    if not sheet.cell(row_index, close_col).value:
-                        # Рассчитываем изменение
-                        price_change = ((current_price - signal_price) / signal_price) * 100
+                        if not sheet.cell(row_index, close_col).value:
+                            sheet.update_cell(row_index, close_col, current_price)
+                            sheet.update_cell(row_index, change_col, f"{price_change:.2f}%")
+                            format_cell(sheet, row_index, change_col, price_change)
 
-                        # Обновляем таблицу
-                        sheet.update_cell(row_index, close_col, current_price)
-                        sheet.update_cell(row_index, change_col, f"{price_change:.2f}%")
+                await asyncio.sleep(60)
 
-            # Проверяем обновления каждую минуту
-            await asyncio.sleep(60)
+            except Exception as e:
+                logger.error(f"Временная ошибка в задаче обновления цен: {e}")
+                await asyncio.sleep(300)  # Увеличиваем задержку при ошибках
 
     except Exception as e:
         logger.error(f"Price update task failed: {e}")
         # Удаляем задачу при ошибке
         if symbol in update_tasks:
             update_tasks.pop(symbol)
+
+def format_cell(sheet, row: int, col: int, value: float):
+    """Применяет цвет к ячейке на основе значения"""
+    try:
+        if value >= 0:
+            # Зелёный для положительных значений
+            sheet.format(
+                f"{chr(64 + col)}{row}",
+                {"textFormat": {"foregroundColor": {"red": 0, "green": 0.7, "blue": 0}}}
+            )
+        else:
+            # Красный для отрицательных
+            sheet.format(
+                f"{chr(64 + col)}{row}",
+                {"textFormat": {"foregroundColor": {"red": 0.8, "green": 0, "blue": 0}}}
+            )
+    except Exception as e:
+        logger.error(f"Failed to format cell: {e}")
 
 class WebhookPayload(BaseModel):
     ticker: str
@@ -106,7 +128,7 @@ async def webhook(request: Request):
             raise HTTPException(status_code=400, detail="Invalid price format")
 
         # Получаем рыночные данные
-        market_cap, volume_24h = coingecko.get_market_data(symbol)
+        market_cap, volume_24h = await coingecko.get_market_data(symbol)
 
         # Формируем сообщение для Telegram
         message = (
@@ -132,7 +154,7 @@ async def webhook(request: Request):
                 symbol.upper(),
                 action.lower(),
                 price,
-                datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.now(pytz.timezone('Europe/Moscow')).strftime("%Y-%m-%d %H:%M:%S"),
                 "", "", "", "", "", "", "", ""
             ])
 
