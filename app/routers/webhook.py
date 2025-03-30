@@ -140,7 +140,7 @@ async def update_price_periodically(sheet, row_index: int, symbol: str, entry_pr
                 })
 
                 # Применяем цветовое форматирование к ячейке с процентом
-                await format_cell(sheet, row_index, col + 1, change_pct)
+                format_cell(sheet, row_index, col + 1, change_pct)
 
                 logger.info(f"Обновлен интервал {name} для {symbol}")
 
@@ -157,21 +157,21 @@ async def update_price_periodically(sheet, row_index: int, symbol: str, entry_pr
             update_tasks.pop(symbol)
 
 
-async def format_cell(sheet, row: int, col: int, value: float):
-    """Применяет цвет фона к ячейке на основе значения (асинхронная версия)"""
+def format_cell(sheet, row: int, col: int, value: float):
+    """Применяет цвет фона к ячейке на основе значения (синхронная версия)"""
     try:
         col_letter = chr(ord('A') + col - 1)  # -1 потому что колонки начинаются с 1
         cell_reference = f"{col_letter}{row}"
 
         if value >= 0:
             # Зелёный фон для положительных значений
-            await sheet.format(
+            sheet.format(
                 cell_reference,
                 {"backgroundColor": {"red": 0.85, "green": 0.95, "blue": 0.85}}
             )
         else:
             # Красный фон для отрицательных значений
-            await sheet.format(
+            sheet.format(
                 cell_reference,
                 {"backgroundColor": {"red": 0.95, "green": 0.85, "blue": 0.85}}
             )
