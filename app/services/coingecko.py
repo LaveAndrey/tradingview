@@ -52,27 +52,6 @@ class CoinGeckoService:
             logger.error(f"Ошибка в get_market_data: {e}")
             return None, None
 
-    async def get_current_price(self, symbol: str) -> float:
-        """Получает текущую цену с кэшированием ID"""
-        try:
-            coins = await self._get_all_coins()
-            coin_data = coins.get(symbol.lower())
-            if not coin_data:
-                raise ValueError(f"Монета {symbol} не найдена")
-
-            for attempt in range(self.retries):
-                try:
-                    price = self.cg.get_price(ids=coin_data['id'], vs_currencies='usd')
-                    return float(price[coin_data['id']]['usd'])
-                except Exception as e:
-                    logger.error(f"Попытка {attempt + 1} не удалась: {e}")
-                    if attempt < self.retries - 1:
-                        await asyncio.sleep(self.delay)
-
-            raise Exception(f"Не удалось получить цену для {symbol}")
-        except Exception as e:
-            logger.error(f"Ошибка в get_current_price: {e}")
-            raise
 
     @staticmethod
     def extract_symbol(ticker: str) -> str:

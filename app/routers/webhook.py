@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from pydantic import BaseModel
 from datetime import datetime
 from typing import Dict
 import asyncio
@@ -8,6 +7,7 @@ from app.services.telegram import TelegramBot
 from app.services.coingecko import CoinGeckoService
 from app.config import Config
 import pytz
+import requests
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -15,108 +15,103 @@ coingecko = CoinGeckoService()
 
 # Настройки Google Sheets
 SPREADSHEET_ID = Config.ID_TABLES  # ID вашей Google Таблицы
+MEXC_API_URL = "https://api.mexc.com/api/v3"
 
 update_tasks: Dict[str, asyncio.Task] = {}
 
 
-async def update_price_periodically(sheet, row_index: int, symbol: str, signal_price: float, action: str):
-    """Фоновая задача для периодического обновления цен с улучшенной обработкой ошибок"""
+async def get_mexc_price(symbol: str) -> float:
+    """Получаем текущую цену с MEXC"""
+    try:
+        response = requests.get(
+            f"{MEXC_API_URL}/ticker/price",
+            params={"symbol": f"{symbol.upper()}_USDT"},
+            timeout=5
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        if 'price' not in data:
+            raise ValueError("Invalid API response format: missing 'price' field")
+
+        return float(data['price'])
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Ошибка запроса к MEXC API: {e}")
+        raise HTTPException(status_code=502, detail="MEXC API unavailable")
+    except (ValueError, KeyError) as e:
+        logger.error(f"Ошибка обработки ответа: {e}")
+        raise HTTPException(status_code=502, detail="Invalid API response")
+    except Exception as e:
+        logger.error(f"Неожиданная ошибка: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+async def update_price_periodically(sheet, row_index: int, symbol: str, entry_price: float, action: str):
+    """Обновление цен с MEXC каждую минуту"""
     moscow_tz = pytz.timezone('Europe/Moscow')
 
-    # Получаем и валидируем время сигнала перед началом цикла
     try:
-        signal_time_str = sheet.cell(row_index, 4).value
-        if not signal_time_str:
-            logger.error(f"Время сигнала не найдено для строки {row_index}")
-            raise ValueError("Missing signal time")
+        # Получаем время входа один раз
+        entry_time_str = sheet.cell(row_index, 4).value
+        entry_time = moscow_tz.localize(datetime.strptime(entry_time_str, "%Y-%m-%d %H:%M:%S"))
 
-        naive_signal_time = datetime.strptime(signal_time_str, "%Y-%m-%d %H:%M:%S")
-        signal_time = moscow_tz.localize(naive_signal_time)
+        intervals = [
+            ('15m', 15 * 60),
+            ('1h', 60 * 60),
+            ('4h', 4 * 60 * 60),
+            ('1d', 24 * 60 * 60)
+        ]
+
+        while True:
+            try:
+                current_price = await get_mexc_price(symbol)
+                current_time = datetime.now(moscow_tz)
+                elapsed = (current_time - entry_time).total_seconds()
+
+                # Расчет изменения цены
+                if action.lower() == 'buy':
+                    change_pct = ((current_price - entry_price) / entry_price) * 100
+                else:
+                    change_pct = ((entry_price - current_price) / entry_price) * 100
+
+                # Обновляем интервалы
+                for name, seconds in intervals:
+                    if elapsed >= seconds:
+                        col = 5 + intervals.index((name, seconds)) * 2
+                        if not sheet.cell(row_index, col).value:
+                            sheet.update_cell(row_index, col, current_price)
+                            sheet.update_cell(row_index, col + 1, f"{change_pct:.2f}%")
+                            logger.info(f"Обновлен {name} для {symbol}")
+
+                await asyncio.sleep(60)
+
+            except Exception as e:
+                logger.error(f"Ошибка обновления: {e}")
+                await asyncio.sleep(300)
+
     except Exception as e:
-        logger.error(f"Ошибка обработки времени сигнала: {e}")
+        logger.error(f"Критическая ошибка: {e}")
         if symbol in update_tasks:
             update_tasks.pop(symbol)
-        return
-
-    intervals = [
-        ('15m', 15 * 60),
-        ('1h', 60 * 60),
-        ('4h', 4 * 60 * 60),
-        ('1d', 24 * 60 * 60)
-    ]
-
-    while True:
-        try:
-            # Проверяем, существует ли еще строка
-            if not sheet.cell(row_index, 1).value:
-                logger.info(f"Строка {row_index} удалена, завершаем задачу")
-                break
-
-            current_price = await coingecko.get_current_price(symbol)
-            current_time = datetime.now(moscow_tz)
-            time_passed = (current_time - signal_time).total_seconds()
-
-            # Рассчитываем изменение цены
-            price_change = ((current_price - signal_price) / signal_price) * 100 if action.lower() == 'buy' \
-                else ((signal_price - current_price) / signal_price) * 100
-
-            # Обновляем интервалы
-            for interval_name, interval_seconds in intervals:
-                if time_passed >= interval_seconds:
-                    close_col = 5 + intervals.index((interval_name, interval_seconds)) * 2
-                    change_col = close_col + 1
-
-                    if not sheet.cell(row_index, close_col).value:
-                        try:
-                            sheet.update_cell(row_index, close_col, current_price)
-                            sheet.update_cell(row_index, change_col, f"{price_change:.2f}%")
-                            format_cell(sheet, row_index, change_col, price_change)
-                            logger.debug(f"Обновлен {interval_name} для {symbol}")
-                        except Exception as e:
-                            logger.error(f"Ошибка обновления ячейки: {e}")
-
-            await asyncio.sleep(60)
-
-        except Exception as e:
-            logger.error(f"Ошибка в цикле обновления: {e}")
-            await asyncio.sleep(300)
-
-            # Проверяем, нужно ли продолжать
-            try:
-                if not sheet.cell(row_index, 1).value:
-                    logger.info("Строка удалена, завершаем задачу")
-                    break
-            except Exception as e:
-                logger.error(f"Ошибка проверки строки: {e}")
-                break
-
-    # Удаляем задачу при выходе
-    if symbol in update_tasks:
-        update_tasks.pop(symbol)
-    logger.info(f"Задача обновления для {symbol} завершена")
 
 def format_cell(sheet, row: int, col: int, value: float):
-    """Применяет цвет к ячейке на основе значения"""
+    """Применяет цвет фона к ячейке на основе значения"""
     try:
         if value >= 0:
-            # Зелёный для положительных значений
+            # Зелёный фон для положительных значений
             sheet.format(
                 f"{chr(64 + col)}{row}",
-                {"textFormat": {"foregroundColor": {"red": 0, "green": 0.7, "blue": 0}}}
+                {"backgroundColor": {"red": 0.85, "green": 0.95, "blue": 0.85}}
             )
         else:
-            # Красный для отрицательных
+            # Красный фон для отрицательных значений
             sheet.format(
                 f"{chr(64 + col)}{row}",
-                {"textFormat": {"foregroundColor": {"red": 0.8, "green": 0, "blue": 0}}}
+                {"backgroundColor": {"red": 0.95, "green": 0.85, "blue": 0.85}}
             )
     except Exception as e:
         logger.error(f"Failed to format cell: {e}")
-
-class WebhookPayload(BaseModel):
-    ticker: str
-    close: str
-    strategy: dict
 
 
 @router.post("/webhook")
@@ -141,30 +136,26 @@ async def webhook(request: Request):
 
         # Извлекаем переменные
         ticker = data.get('ticker', 'N/A')
-        close = data.get('close', 'N/A')
         action = data.get('strategy.order.action', 'N/A')
+
+        symbol = coingecko.extract_symbol(ticker.lower())
 
         # Эмодзи для действия
         action_emoji = '🟢' if action.lower() == 'buy' else '🔴' if action.lower() == 'sell' else '⚪'
 
         # Получаем символ монеты
-        symbol = coingecko.extract_symbol(ticker.lower())
         logger.info(f"Extracted symbol: {symbol.lower()}")
 
-        try:
-            price = float(close)
-        except ValueError:
-            logger.error(f"Invalid price format: {close}")
-            raise HTTPException(status_code=400, detail="Invalid price format")
 
         # Получаем рыночные данные
         market_cap, volume_24h = await coingecko.get_market_data(symbol)
+        current_price = await get_mexc_price(symbol)
 
         # Формируем сообщение для Telegram
         message = (
             f"{action_emoji} *{action.upper()}* \n\n"
             f"*{symbol.upper()}*\n\n"
-            f"PRICE - *{price}$*\n"
+            f"PRICE - *{current_price}$*\n"
             f"MARKET CAP - *{coingecko.format_number(market_cap)}$*\n"
             f"24H VOLUME - *{coingecko.format_number(volume_24h)}$*\n\n"
             f"Trading on the MEXC exchange - *https://promote.mexc.com/r/scn7giWq*"
@@ -183,7 +174,7 @@ async def webhook(request: Request):
             sheet.append_row([
                 symbol.upper(),
                 action.lower(),
-                price,
+                current_price,
                 datetime.now(pytz.timezone('Europe/Moscow')).strftime("%Y-%m-%d %H:%M:%S"),
                 "", "", "", "", "", "", "", ""
             ])
@@ -191,7 +182,7 @@ async def webhook(request: Request):
             row_index = len(sheet.get_all_values())
 
             task = asyncio.create_task(
-                update_price_periodically(sheet, row_index, symbol, float(price), action)
+                update_price_periodically(sheet, row_index, symbol, float(current_price), action)
             )
             update_tasks[symbol] = task
 
