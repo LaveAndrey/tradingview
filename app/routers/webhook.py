@@ -23,28 +23,62 @@ update_tasks: Dict[str, asyncio.Task] = {}
 async def get_mexc_price(symbol: str) -> float:
     """Получаем текущую цену с MEXC"""
     try:
+        # Очистка и валидация символа
+        clean_symbol = symbol.upper().strip()
+        if not clean_symbol:
+            raise ValueError("Empty symbol provided")
+
+        # Формируем торговую пару (обратите внимание на отсутствие подчеркивания)
+        trading_pair = f"{clean_symbol}USDT"
+
+        # Выполняем запрос
         response = requests.get(
             f"{MEXC_API_URL}/ticker/price",
-            params={"symbol": f"{symbol.upper()}USDT"},
-            timeout=5
+            params={"symbol": trading_pair},
+            timeout=10  # Увеличил таймаут для надежности
         )
+
+        # Логируем URL для отладки
+        logger.debug(f"MEXC API request URL: {response.url}")
+
         response.raise_for_status()
 
         data = response.json()
-        if 'price' not in data:
-            raise ValueError("Invalid API response format: missing 'price' field")
 
-        return float(data['price'])
+        # Проверяем структуру ответа
+        if not isinstance(data, dict) or 'price' not in data:
+            raise ValueError(f"Invalid API response structure: {data}")
 
+        price = float(data['price'])
+        logger.info(f"Успешно получена цена для {clean_symbol}: {price}")
+
+        return price
+
+    except requests.exceptions.HTTPError as e:
+        error_detail = f"{e.response.status_code} - {e.response.text}" if e.response else str(e)
+        logger.error(f"Ошибка запроса к MEXC API: {error_detail}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"MEXC API error: {error_detail}"
+        )
     except requests.exceptions.RequestException as e:
-        logger.error(f"Ошибка запроса к MEXC API: {e}")
-        raise HTTPException(status_code=502, detail="MEXC API unavailable")
+        logger.error(f"Сетевая ошибка при запросе к MEXC API: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="MEXC API temporarily unavailable"
+        )
     except (ValueError, KeyError) as e:
         logger.error(f"Ошибка обработки ответа: {e}")
-        raise HTTPException(status_code=502, detail="Invalid API response")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Invalid API response: {str(e)}"
+        )
     except Exception as e:
-        logger.error(f"Неожиданная ошибка: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"Неожиданная ошибка: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
 
 
 async def update_price_periodically(sheet, row_index: int, symbol: str, entry_price: float, action: str):
