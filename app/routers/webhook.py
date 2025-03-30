@@ -163,17 +163,20 @@ def format_cell(sheet, row: int, col: int, value: float):
         col_letter = chr(ord('A') + col - 1)  # -1 потому что колонки начинаются с 1
         cell_reference = f"{col_letter}{row}"
 
+        if value == 0:
+            return
+
         if value >= 0:
             # Зелёный фон для положительных значений
             sheet.format(
                 cell_reference,
-                {"backgroundColor": {"red": 0, "green": 1, "blue": 0}}
+                {"backgroundColor": {"red": 0.5, "green": 1, "blue": 0.5}}
             )
         else:
             # Красный фон для отрицательных значений
             sheet.format(
                 cell_reference,
-                {"backgroundColor": {"red": 1, "green": 0, "blue": 0}}
+                {"backgroundColor": {"red": 1, "green": 0.5, "blue": 0.5}}
             )
     except Exception as e:
         logger.error(f"Failed to format cell: {e}")
