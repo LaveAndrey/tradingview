@@ -20,90 +20,80 @@ update_tasks: Dict[str, asyncio.Task] = {}
 
 
 async def update_price_periodically(sheet, row_index: int, symbol: str, signal_price: float, action: str):
-    """Фоновая задача для периодического обновления цен"""
+    """Фоновая задача для периодического обновления цен с улучшенной обработкой ошибок"""
+    moscow_tz = pytz.timezone('Europe/Moscow')
+
+    # Получаем и валидируем время сигнала перед началом цикла
     try:
-        intervals = [
-            ('15m', 15 * 60),
-            ('1h', 60 * 60),
-            ('4h', 4 * 60 * 60),
-            ('1d', 24 * 60 * 60)
-        ]
-
-        moscow_tz = pytz.timezone('Europe/Moscow')
-
-        # Получаем время сигнала один раз в начале
         signal_time_str = sheet.cell(row_index, 4).value
         if not signal_time_str:
-            logger.error(f"Не найдено время сигнала для строки {row_index}")
-            if symbol in update_tasks:
-                update_tasks.pop(symbol)
-            return
+            logger.error(f"Время сигнала не найдено для строки {row_index}")
+            raise ValueError("Missing signal time")
 
-        try:
-            # Парсим время и устанавливаем временную зону
-            naive_signal_time = datetime.strptime(signal_time_str, "%Y-%m-%d %H:%M:%S")
-            signal_time = moscow_tz.localize(naive_signal_time)
-        except ValueError as e:
-            logger.error(f"Неверный формат времени сигнала: {signal_time_str}. Ошибка: {e}")
-            if symbol in update_tasks:
-                update_tasks.pop(symbol)
-            return
-
-        while True:
-            try:
-                # Получаем текущую цену
-                current_price = await coingecko.get_current_price(symbol)
-
-                # Рассчитываем изменение цены
-                if action.lower() == 'buy':
-                    price_change = ((current_price - signal_price) / signal_price) * 100  # Лонг
-                else:
-                    price_change = ((signal_price - current_price) / signal_price) * 100  # Шорт
-
-                # Рассчитываем прошедшее время с учетом временной зоны
-                current_time = datetime.now(moscow_tz)
-                time_passed = (current_time - signal_time).total_seconds()
-
-                # Обновляем интервалы
-                for interval_name, interval_seconds in intervals:
-                    if time_passed >= interval_seconds:
-                        close_col = 5 + intervals.index((interval_name, interval_seconds)) * 2
-                        change_col = close_col + 1
-
-                        # Проверяем, не обновляли ли уже этот интервал
-                        if not sheet.cell(row_index, close_col).value:
-                            try:
-                                sheet.update_cell(row_index, close_col, current_price)
-                                sheet.update_cell(row_index, change_col, f"{price_change:.2f}%")
-                                format_cell(sheet, row_index, change_col, price_change)
-                                logger.info(f"Обновлен интервал {interval_name} для {symbol}")
-                            except Exception as update_error:
-                                logger.error(f"Ошибка обновления ячейки: {update_error}")
-                                continue  # Продолжаем с следующим интервалом
-
-                await asyncio.sleep(60)  # Пауза между проверками
-
-            except Exception as e:
-                logger.error(f"Временная ошибка в задаче обновления цен: {e}")
-                await asyncio.sleep(300)  # Увеличиваем задержку при ошибках
-
-                # Проверяем, существует ли еще строка в таблице
-                try:
-                    if not sheet.cell(row_index, 1).value:  # Проверяем первый столбец
-                        logger.info(f"Строка {row_index} больше не существует, завершаем задачу")
-                        if symbol in update_tasks:
-                            update_tasks.pop(symbol)
-                        return
-                except Exception as check_error:
-                    logger.error(f"Ошибка проверки строки: {check_error}")
-                    if symbol in update_tasks:
-                        update_tasks.pop(symbol)
-                    return
-
+        naive_signal_time = datetime.strptime(signal_time_str, "%Y-%m-%d %H:%M:%S")
+        signal_time = moscow_tz.localize(naive_signal_time)
     except Exception as e:
-        logger.error(f"Критическая ошибка в фоновой задаче: {e}")
+        logger.error(f"Ошибка обработки времени сигнала: {e}")
         if symbol in update_tasks:
             update_tasks.pop(symbol)
+        return
+
+    intervals = [
+        ('15m', 15 * 60),
+        ('1h', 60 * 60),
+        ('4h', 4 * 60 * 60),
+        ('1d', 24 * 60 * 60)
+    ]
+
+    while True:
+        try:
+            # Проверяем, существует ли еще строка
+            if not sheet.cell(row_index, 1).value:
+                logger.info(f"Строка {row_index} удалена, завершаем задачу")
+                break
+
+            current_price = await coingecko.get_current_price(symbol)
+            current_time = datetime.now(moscow_tz)
+            time_passed = (current_time - signal_time).total_seconds()
+
+            # Рассчитываем изменение цены
+            price_change = ((current_price - signal_price) / signal_price) * 100 if action.lower() == 'buy' \
+                else ((signal_price - current_price) / signal_price) * 100
+
+            # Обновляем интервалы
+            for interval_name, interval_seconds in intervals:
+                if time_passed >= interval_seconds:
+                    close_col = 5 + intervals.index((interval_name, interval_seconds)) * 2
+                    change_col = close_col + 1
+
+                    if not sheet.cell(row_index, close_col).value:
+                        try:
+                            sheet.update_cell(row_index, close_col, current_price)
+                            sheet.update_cell(row_index, change_col, f"{price_change:.2f}%")
+                            format_cell(sheet, row_index, change_col, price_change)
+                            logger.debug(f"Обновлен {interval_name} для {symbol}")
+                        except Exception as e:
+                            logger.error(f"Ошибка обновления ячейки: {e}")
+
+            await asyncio.sleep(60)
+
+        except Exception as e:
+            logger.error(f"Ошибка в цикле обновления: {e}")
+            await asyncio.sleep(300)
+
+            # Проверяем, нужно ли продолжать
+            try:
+                if not sheet.cell(row_index, 1).value:
+                    logger.info("Строка удалена, завершаем задачу")
+                    break
+            except Exception as e:
+                logger.error(f"Ошибка проверки строки: {e}")
+                break
+
+    # Удаляем задачу при выходе
+    if symbol in update_tasks:
+        update_tasks.pop(symbol)
+    logger.info(f"Задача обновления для {symbol} завершена")
 
 def format_cell(sheet, row: int, col: int, value: float):
     """Применяет цвет к ячейке на основе значения"""
