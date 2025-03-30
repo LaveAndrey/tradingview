@@ -161,7 +161,7 @@ async def webhook(request: Request):
             row_index = len(sheet.get_all_values())
 
             task = asyncio.create_task(
-                update_price_periodically(sheet, row_index, symbol, float(price))
+                update_price_periodically(sheet, row_index, symbol, float(price), action)
             )
             update_tasks[symbol] = task
 
