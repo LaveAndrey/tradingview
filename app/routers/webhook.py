@@ -25,7 +25,7 @@ async def get_mexc_price(symbol: str) -> float:
     try:
         response = requests.get(
             f"{MEXC_API_URL}/ticker/price",
-            params={"symbol": f"{symbol.upper()}_USDT"},
+            params={"symbol": f"{symbol.upper()}USDT"},
             timeout=5
         )
         response.raise_for_status()
