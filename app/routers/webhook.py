@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict
 import asyncio
 import logging
@@ -82,26 +82,35 @@ async def get_mexc_price(symbol: str) -> float:
 
 
 async def update_price_periodically(sheet, row_index: int, symbol: str, entry_price: float, action: str):
-    """Обновление цен с MEXC каждую минуту"""
+    """Обновление цен через фиксированные интервалы после сигнала"""
     moscow_tz = pytz.timezone('Europe/Moscow')
 
     try:
-        # Получаем время входа один раз
+        # Получаем время входа
         entry_time_str = sheet.cell(row_index, 4).value
         entry_time = moscow_tz.localize(datetime.strptime(entry_time_str, "%Y-%m-%d %H:%M:%S"))
 
+        # Интервалы в секундах (название, интервал)
         intervals = [
-            ('15m', 15 * 60),
-            ('1h', 60 * 60),
-            ('4h', 4 * 60 * 60),
-            ('1d', 24 * 60 * 60)
+            ('15m', 15 * 60),  # 15 минут
+            ('1h', 60 * 60),  # 1 час
+            ('4h', 4 * 60 * 60),  # 4 часа
+            ('1d', 24 * 60 * 60)  # 1 день
         ]
 
-        while True:
+        # Ждем наступления каждого интервала
+        for name, delay in intervals:
             try:
+                # Вычисляем время, когда нужно обновить данные
+                target_time = entry_time + timedelta(seconds=delay)
+                sleep_duration = (target_time - datetime.now(moscow_tz)).total_seconds()
+
+                if sleep_duration > 0:
+                    logger.info(f"Ожидание {name} обновления для {symbol} (через {sleep_duration:.0f} сек)")
+                    await asyncio.sleep(sleep_duration)
+
+                # Получаем текущую цену
                 current_price = await get_mexc_price(symbol)
-                current_time = datetime.now(moscow_tz)
-                elapsed = (current_time - entry_time).total_seconds()
 
                 # Расчет изменения цены
                 if action.lower() == 'buy':
@@ -109,39 +118,61 @@ async def update_price_periodically(sheet, row_index: int, symbol: str, entry_pr
                 else:
                     change_pct = ((entry_price - current_price) / entry_price) * 100
 
-                # Обновляем интервалы
-                for name, seconds in intervals:
-                    if elapsed >= seconds:
-                        col = 5 + intervals.index((name, seconds)) * 2
-                        if not sheet.cell(row_index, col).value:
-                            sheet.update_cell(row_index, col, current_price)
-                            sheet.update_cell(row_index, col + 1, f"{change_pct:.2f}%")
-                            logger.info(f"Обновлен {name} для {symbol}")
+                # Определяем колонку для записи
+                col = 5 + intervals.index((name, delay)) * 2
 
-                await asyncio.sleep(60)
+                # Обновляем данные
+                sheet.update_cell(row_index, col, current_price)
+
+                # Записываем процентное изменение (как число для последующего форматирования)
+                sheet.update_cell(row_index, col + 1, change_pct / 100)
+
+                # Получаем букву колонки для форматирования
+                col_letter = chr(ord('A') + col)
+                percent_cell = f"{col_letter}{row_index}"
+
+                # Применяем процентный формат с запятой
+                sheet.format(percent_cell, {
+                    "numberFormat": {
+                        "type": "PERCENT",
+                        "pattern": "#,##0.00%"
+                    }
+                })
+
+                # Применяем цветовое форматирование к ячейке с процентом
+                await format_cell(sheet, row_index, col + 1, change_pct)
+
+                logger.info(f"Обновлен интервал {name} для {symbol}")
 
             except Exception as e:
-                logger.error(f"Ошибка обновления: {e}")
-                await asyncio.sleep(300)
+                logger.error(f"Ошибка при обновлении интервала {name}: {e}")
+                continue
+
+        logger.info(f"Все интервалы обновлены для {symbol}")
 
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}")
+    finally:
         if symbol in update_tasks:
             update_tasks.pop(symbol)
 
-def format_cell(sheet, row: int, col: int, value: float):
-    """Применяет цвет фона к ячейке на основе значения"""
+
+async def format_cell(sheet, row: int, col: int, value: float):
+    """Применяет цвет фона к ячейке на основе значения (асинхронная версия)"""
     try:
+        col_letter = chr(ord('A') + col - 1)  # -1 потому что колонки начинаются с 1
+        cell_reference = f"{col_letter}{row}"
+
         if value >= 0:
             # Зелёный фон для положительных значений
-            sheet.format(
-                f"{chr(64 + col)}{row}",
+            await sheet.format(
+                cell_reference,
                 {"backgroundColor": {"red": 0.85, "green": 0.95, "blue": 0.85}}
             )
         else:
             # Красный фон для отрицательных значений
-            sheet.format(
-                f"{chr(64 + col)}{row}",
+            await sheet.format(
+                cell_reference,
                 {"backgroundColor": {"red": 0.95, "green": 0.85, "blue": 0.85}}
             )
     except Exception as e:
