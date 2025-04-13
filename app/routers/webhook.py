@@ -11,7 +11,7 @@ import requests
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-cmc = CoinMarketCapService()
+cmc = CoinMarketCapService(api_key=Config.COINMARKETCAP_API_KEY)
 
 # Настройки Google Sheets
 SPREADSHEET_ID = Config.ID_TABLES  # ID вашей Google Таблицы
