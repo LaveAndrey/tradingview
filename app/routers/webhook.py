@@ -4,14 +4,14 @@ from typing import Dict
 import asyncio
 import logging
 from app.services.telegram import TelegramBot
-from app.services.coingecko import CoinGeckoService
+from app.services.cmc import CoinMarketCapService
 from app.config import Config
 import pytz
 import requests
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-coingecko = CoinGeckoService()
+cmc = CoinMarketCapService()
 
 # Настройки Google Sheets
 SPREADSHEET_ID = Config.ID_TABLES  # ID вашей Google Таблицы
@@ -206,7 +206,7 @@ async def webhook(request: Request):
         ticker = data.get('ticker', 'N/A')
         action = data.get('strategy.order.action', 'N/A')
 
-        symbol = coingecko.extract_symbol(ticker.lower())
+        symbol = cmc.extract_symbol(ticker.lower())
 
         # Эмодзи для действия
         action_emoji = '🟢' if action.lower() == 'buy' else '🔴' if action.lower() == 'sell' else '⚪'
@@ -216,7 +216,7 @@ async def webhook(request: Request):
 
 
         # Получаем рыночные данные
-        market_cap, volume_24h = await coingecko.get_market_data(symbol)
+        market_cap, volume_24h = await cmc.get_market_data(symbol)
         current_price = await get_mexc_price(symbol)
 
         # Формируем сообщение для Telegram
@@ -224,8 +224,8 @@ async def webhook(request: Request):
             f"{action_emoji} *{action.upper()}* \n\n"
             f"*{symbol.upper()}*\n\n"
             f"PRICE - *{current_price}$*\n"
-            f"MARKET CAP - *{coingecko.format_number(market_cap)}$*\n"
-            f"24H VOLUME - *{coingecko.format_number(volume_24h)}$*\n\n"
+            f"MARKET CAP - *{cmc.format_number(market_cap)}$*\n"
+            f"24H VOLUME - *{cmc.format_number(volume_24h)}$*\n\n"
             f"Trading on the MEXC exchange - *https://promote.mexc.com/r/scn7giWq*"
         )
 
